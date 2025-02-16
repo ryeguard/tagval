@@ -8,7 +8,7 @@ import (
 
 type Validator interface {
 	Validate(obj any) (bool, error)
-	Register(string, any, func(any) (bool, error))
+	Register(string, any, ValidationFunc)
 }
 
 type ValidatorOptions struct {
@@ -22,7 +22,7 @@ type structField struct {
 
 type structValidator struct {
 	structTag       string
-	validationFuncs map[structField](func(any) (bool, error))
+	validationFuncs map[structField](ValidationFunc)
 }
 
 var _ Validator = &structValidator{}
@@ -74,9 +74,11 @@ func (v *structValidator) Validate(obj any) (bool, error) {
 	return true, nil
 }
 
-func (v *structValidator) Register(name string, obj any, fun func(any) (bool, error)) {
+type ValidationFunc func(obj any) (bool, error)
+
+func (v *structValidator) Register(name string, obj any, fun ValidationFunc) {
 	if v.validationFuncs == nil {
-		v.validationFuncs = map[structField]func(any) (bool, error){}
+		v.validationFuncs = map[structField]ValidationFunc{}
 	}
 	structName := reflect.TypeOf(obj).Name()
 	v.validationFuncs[structField{
