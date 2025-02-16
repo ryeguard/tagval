@@ -16,27 +16,33 @@ import (
 )
 
 type User struct {
-    Name string
-    Age  int    `validate:"adult"`
+    Name string `validate:"required"`
+    Age  int    `validate:">=:18"` 
 }
 
 func main() {
-	validator := tagval.New()
 
-	validator.Register("adult", User{}, func(obj any) (bool, error) {
-		return obj.(User).Age >= 18, nil
+    validator := tagval.New()
+
+    validator.RegisterOperator(reflect.String, "required", func(obj any, _ string) bool {
+        return obj.(string) != ""
+    })
+
+    validator.RegisterOperator(reflect.Int, ">=", func(obj any, value string) bool {
+        i, err := strconv.Atoi(value)
+        if err != nil {
+            return false
+        }
+        return obj.(int) >= i
 	})
 
-    user := User{
+    ok, err := validator.Validate(User{
         Name: "John",
         Age:  20,
-    }
-
-    ok, err := validator.Validate(user)
+    })
     if err != nil {
         panic(err)
     }
     fmt.Println(ok) // true
 }
 ```
-

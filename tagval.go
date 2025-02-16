@@ -7,115 +7,105 @@ import (
 )
 
 type Validator interface {
-	Validate(obj any) (bool, error)
-	Register(string, any, ValidationFunc)
-	TagValue(obj any, name string) string
+	Validate(any) (bool, error)
+	Register(any) error
+	RegisterOperator(reflect.Kind, string, OperatorFunc)
 }
 
 type ValidatorOptions struct {
-	StructTag      string
-	FieldSeparator string
-}
-
-type structField struct {
-	structName string
-	ruleName   string
+	StructTag string
 }
 
 type structValidator struct {
-	structTag       string
-	fieldSeparator  string
-	validationFuncs map[structField](ValidationFunc)
+	structTag string
+	rules     map[string]map[string]ValidationFunc
+	operators map[string]map[reflect.Kind]OperatorFunc // map[operator][type]
 }
 
 var _ Validator = &structValidator{}
 
-func (v *structValidator) Validate(obj any) (bool, error) {
+func (v *structValidator) Validate(obj any) (ok bool, err error) {
 	val := reflect.ValueOf(obj)
-
-	tagged := false
+	structName := val.Type().Name()
 
 	for i := range val.NumField() {
-		tag := val.Type().Field(i).Tag.Get(v.structTag)
-		if tag == "" {
-			continue
-		} else {
-			tagged = true
-		}
+		field := val.Type().Field(i)
 
-		ruleNames := strings.Split(tag, ",")
-
-		checked := map[string]bool{}
-
-		for _, name := range ruleNames {
-			name = strings.Split(name, v.fieldSeparator)[0]
-			rule, ok := v.validationFuncs[structField{
-				structName: reflect.TypeOf(obj).Name(),
-				ruleName:   name,
-			}]
-			if !ok {
-				return false, fmt.Errorf("rule not registered")
-			}
-
-			valid, err := rule(obj)
-			if err != nil {
-				return false, fmt.Errorf("rule error: %w", err)
-			}
-
-			checked[name] = valid
-		}
-		for _, check := range checked {
-			if !check {
+		if rule, ok := v.rules[structName][field.Name]; ok {
+			if valid, err := rule(val.Field(i).Interface()); err != nil {
+				return false, err
+			} else if !valid {
+				fmt.Printf("field %v failed validation\n", field.Name)
 				return false, nil
 			}
 		}
 	}
-
-	if !tagged {
-		return false, fmt.Errorf("struct with registered function was not tagged")
-	}
-
 	return true, nil
 }
 
 type ValidationFunc func(obj any) (bool, error)
+type OperatorFunc func(obj any, val string) bool
 
-func (v *structValidator) TagValue(obj any, name string) string {
+func (v *structValidator) Register(obj any) error {
 	val := reflect.ValueOf(obj)
+	structName := val.Type().Name()
+
 	for i := range val.NumField() {
-		tag := val.Type().Field(i).Tag.Get(v.structTag)
+		field := val.Type().Field(i)
 
-		ruleNames := strings.Split(tag, ",")
+		validationTag, ok := field.Tag.Lookup("validate")
+		if !ok {
+			continue
+		}
 
-		for _, rule := range ruleNames {
-			if strings.HasPrefix(rule, name) {
-				return strings.Split(rule, v.fieldSeparator)[1]
+		fieldKind := field.Type.Kind()
+
+		for _, tag := range strings.Split(validationTag, ",") {
+			opName := strings.Split(tag, ":")[0]
+
+			if _, ok := v.operators[opName]; !ok {
+				return fmt.Errorf("operator '%v' not registered", opName)
+			}
+
+			tagValue := ""
+			if len(strings.Split(tag, ":")) > 1 {
+				tagValue = strings.Split(tag, ":")[1]
+			}
+
+			op, ok := v.operators[opName][fieldKind]
+			if !ok {
+				return fmt.Errorf("operator '%v' not registered for kind '%v'", opName, fieldKind)
+			}
+
+			if v.rules[structName] == nil {
+				v.rules[structName] = map[string]ValidationFunc{}
+			}
+
+			v.rules[structName][field.Name] = func(obj any) (bool, error) {
+				return op(obj, tagValue), nil
 			}
 		}
 	}
-	return ""
+
+	return nil
 }
 
-func (v *structValidator) Register(name string, obj any, fun ValidationFunc) {
-	if v.validationFuncs == nil {
-		v.validationFuncs = map[structField]ValidationFunc{}
+func (v *structValidator) RegisterOperator(typ reflect.Kind, name string, fn OperatorFunc) {
+	if v.operators[name] == nil {
+		v.operators[name] = map[reflect.Kind]OperatorFunc{}
 	}
-	structName := reflect.TypeOf(obj).Name()
-	v.validationFuncs[structField{
-		structName: structName,
-		ruleName:   name,
-	}] = fun
+
+	v.operators[name][typ] = fn
 }
 
 func New(opts ValidatorOptions) Validator {
 	if opts.StructTag == "" {
 		opts.StructTag = "validate"
 	}
-	if opts.FieldSeparator == "" {
-		opts.FieldSeparator = "#"
-	}
+
 	return &structValidator{
-		structTag:      opts.StructTag,
-		fieldSeparator: opts.FieldSeparator,
+		structTag: opts.StructTag,
+		rules:     map[string]map[string]ValidationFunc{},
+		operators: map[string]map[reflect.Kind]OperatorFunc{},
 	}
 }

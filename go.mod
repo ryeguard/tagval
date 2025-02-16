@@ -2,7 +2,10 @@ module github.com/ryeguard/tagval
 
 go 1.22.4
 
-require github.com/stretchr/testify v1.10.0
+require (
+	github.com/stretchr/testify v1.10.0
+	golang.org/x/text v0.22.0
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
